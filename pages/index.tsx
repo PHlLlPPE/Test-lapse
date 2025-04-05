@@ -1,113 +1,148 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
+import { useEffect, useState } from "react";
+import { cards as allCards } from "@/data/cards";
+import { Gauge, Card as CardType } from "@/types/types";
+import Card from "@/components/Card";
+import IntroScreen from "@/components/IntroScreen";
+import GameOverScreen from "@/components/GameOverScreen";
+import VictoryScreen from "@/components/VictoryScreen";
+import AnimatedGauge from "@/components/AnimatedGauge";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const STORAGE_KEY = "dynastie-progress";
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+function saveProgress(state: {
+  gauges: Gauge[];
+  deck: CardType[];
+  cardIndex: number;
+}) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadProgress(): { gauges: Gauge[]; deck: CardType[]; cardIndex: number } | null {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved);
+  } catch {
+    return null;
+  }
+}
 
 export default function Home() {
+  const [isStarted, setIsStarted] = useState(false);
+  const [gauges, setGauges] = useState<Gauge[]>([
+    { name: "Ressources", value: 50 },
+    { name: "Popularité", value: 50 },
+    { name: "Armement", value: 50 },
+    { name: "Finance", value: 50 },
+  ]);
+
+  const [deltas, setDeltas] = useState<Record<string, number>>({});
+  const [deck, setDeck] = useState<CardType[]>([]);
+  const [cardIndex, setCardIndex] = useState(0);
+  const [badEnding, setBadEnding] = useState<{ pillar: string; value: number } | null>(null);
+
+  const handleRestart = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setIsStarted(false);
+    setDeck([]);
+    setCardIndex(0);
+    setBadEnding(null);
+    setDeltas({});
+    setGauges([
+      { name: "Ressources", value: 50 },
+      { name: "Popularité", value: 50 },
+      { name: "Armement", value: 50 },
+      { name: "Finance", value: 50 },
+    ]);
+  };
+
+  useEffect(() => {
+    if (isStarted) {
+      const saved = loadProgress();
+      if (saved) {
+        setGauges(saved.gauges);
+        setDeck(saved.deck);
+        setCardIndex(saved.cardIndex);
+      } else {
+        const shuffled = [...allCards].sort(() => Math.random() - 0.5);
+        setDeck(shuffled);
+        setCardIndex(0);
+      }
+    }
+  }, [isStarted]);
+
+  const handleChoice = (effects: Partial<Record<string, number>>) => {
+    const newDeltas: Record<string, number> = {};
+    const newGauges = gauges.map((g) => {
+      const change = effects[g.name] || 0;
+      newDeltas[g.name] = change;
+      return {
+        ...g,
+        value: Math.max(0, Math.min(100, g.value + change)),
+      };
+    });
+
+    setDeltas(newDeltas);
+
+    const critical = newGauges.find((g) => g.value === 0 || g.value === 100);
+    if (critical) {
+      localStorage.removeItem(STORAGE_KEY);
+      setGauges(newGauges);
+      setBadEnding({ pillar: critical.name, value: critical.value });
+      return;
+    }
+
+    setGauges(newGauges);
+    setCardIndex((prev) => {
+      const newIndex = prev + 1;
+      saveProgress({ gauges: newGauges, deck, cardIndex: newIndex });
+      return newIndex;
+    });
+  };
+
+  const currentCard: CardType | undefined = deck[cardIndex];
+
+  if (!isStarted) {
+    return <IntroScreen onStart={() => setIsStarted(true)} />;
+  }
+
+  if (badEnding) {
+    return (
+      <GameOverScreen
+        pillar={badEnding.pillar}
+        value={badEnding.value}
+        onRestart={handleRestart}
+      />
+    );
+  }
+
+  if (cardIndex >= deck.length && isStarted && !badEnding) {
+    localStorage.removeItem(STORAGE_KEY);
+    return <VictoryScreen gauges={gauges} onRestart={handleRestart} />;
+  }
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              pages/index.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+    <main className="min-h-screen bg-[url('/bg-paper.jpg')] bg-cover bg-center text-gray-900 px-4 py-6 sm:p-8">
+      <div className="w-full max-w-xl mx-auto bg-white/90 rounded-xl shadow-xl p-4 sm:p-6 border border-yellow-900">
+        <h1 className="text-2xl sm:text-3xl font-bold text-center text-yellow-900 mb-6">
+          Dynastie Khmer
+        </h1>
+
+        <div className="mb-6">
+          {gauges.map((g) => (
+            <AnimatedGauge
+              key={g.name}
+              name={g.name}
+              value={g.value}
+              delta={deltas[g.name]}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          ))}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        {currentCard && (
+          <Card card={currentCard} onChoose={handleChoice} />
+        )}
+      </div>
+    </main>
   );
 }
